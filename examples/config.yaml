@@ -1,0 +1,41 @@
+# Delta Platform Configuration Example
+
+# Bronze layer configuration
+bronze:
+  path: /mnt/delta/bronze
+  checkpoint_path: /mnt/delta/bronze/_checkpoints
+  partition_columns: []
+  merge_schema: true
+  overwrite_schema: false
+
+# Silver layer configuration
+silver:
+  path: /mnt/delta/silver
+  checkpoint_path: /mnt/delta/silver/_checkpoints
+  partition_columns:
+    - date
+  merge_schema: true
+  overwrite_schema: false
+
+# Gold layer configuration
+gold:
+  path: /mnt/delta/gold
+  checkpoint_path: /mnt/delta/gold/_checkpoints
+  partition_columns:
+    - year
+    - month
+  merge_schema: true
+  overwrite_schema: false
+
+# Spark configuration
+spark_config:
+  spark.databricks.delta.optimizeWrite.enabled: "true"
+  spark.databricks.delta.autoCompact.enabled: "true"
+  spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite: "true"
+  spark.databricks.delta.properties.defaults.autoOptimize.autoCompact: "true"
+  spark.sql.adaptive.enabled: "true"
+  spark.sql.adaptive.coalescePartitions.enabled: "true"
+
+# Optional: Unity Catalog settings
+catalog: main
+schema: production
