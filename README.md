@@ -1,19 +1,20 @@
 # Delta Platform Library
 
-A comprehensive Python library for managing Delta Lake data platforms with medallion architecture on Databricks Spark.
+A comprehensive Python library for managing Delta Lake data platforms with medallion architecture on Databricks Spark, built with clean design patterns for maintainability and extensibility.
 
-## Features
+## 🎯 Features
 
-- **Medallion Architecture**: Built-in support for Bronze, Silver, and Gold layers
-- **Multiple Format Ingestion**: Support for JSON, XML, Parquet, and CSV formats
-- **Data Quality**: Built-in deduplication, cleaning, and validation
-- **Slowly Changing Dimensions**: SCD Type 2 implementation
-- **Streaming Support**: Real-time data ingestion with Spark Structured Streaming
-- **Advanced Transformations**: Merge updates, time-series aggregations, star schema creation
-- **Optimization**: Automatic table optimization and vacuuming
-- **Configuration Management**: YAML-based configuration support
+- **Table-Centric Design**: Manage individual Delta tables with full control over operations
+- **Design Patterns**: Built using Builder, Strategy, and Repository patterns
+- **Medallion Architecture**: Bronze, Silver, and Gold layers
+- **Multiple Formats**: JSON, XML, Parquet, CSV ingestion
+- **Pluggable Transformations**: Strategy pattern for flexible data transformations
+- **Data Quality**: Cleaning, deduplication, and validation strategies
+- **Merge Operations**: Upserts, SCD Type 2, incremental updates
+- **Optimization**: Z-ordering, vacuuming, and table maintenance
+- **Method Chaining**: Fluent interface for readable code
 
-## Installation
+## 📦 Installation
 
 Install using uv (recommended):
 
@@ -27,336 +28,478 @@ Or using pip:
 pip install delta-platform
 ```
 
-## Quick Start
+## 🚀 Quick Start
+
+### Managing a Single Table
 
 ```python
-from delta_platform import DeltaPlatform, PlatformConfig
+from pyspark.sql import SparkSession
+from delta_platform import TableBuilder, MedallionLayer, JsonDataSource, CleaningStrategy
 
-# Create configuration
-config = PlatformConfig.create_default("/mnt/delta")
+# Create Spark session
+spark = SparkSession.builder.getOrCreate()
 
-# Initialize platform
-with DeltaPlatform(config) as platform:
-    # Ingest data into Bronze layer
-    platform.bronze.ingest_json(
-        source_path="/data/raw/users.json",
-        table_name="users_raw"
-    )
+# Build a table using the Builder pattern
+users_table = (TableBuilder(spark)
+    .name("users")
+    .path("/data/bronze/users")
+    .layer(MedallionLayer.BRONZE)
+    .partition_by(["country"])
+    .z_order_by(["user_id"])
+    .build())
 
-    # Transform to Silver layer
-    def clean_data(df):
-        return df.dropna().dropDuplicates()
+# Ingest data using Repository pattern
+source = JsonDataSource(spark, "/raw/users/*.json")
+users_df = source.read(multiline=True)
 
-    platform.silver.transform_from_bronze(
-        bronze_table=platform.bronze.table_path("users_raw"),
-        silver_table="users_clean",
-        transformation_func=clean_data
-    )
+# Append data with deduplication
+users_table.append(users_df, deduplicate=True, deduplicate_columns=["user_id"])
 
-    # Create Gold layer aggregations
-    def aggregate(dfs):
-        return dfs[0].groupBy("category").count()
-
-    platform.gold.create_aggregate(
-        source_tables=[platform.silver.table_path("users_clean")],
-        target_table="user_summary",
-        aggregation_func=aggregate
-    )
-```
-
-## Architecture
-
-### Medallion Architecture Layers
-
-The library implements the medallion architecture pattern with three distinct layers:
-
-#### Bronze Layer (Raw Data)
-- Ingests raw data from various sources
-- Preserves original data format
-- Adds ingestion metadata (timestamp, source file)
-- Supports batch and streaming ingestion
-
-#### Silver Layer (Cleaned Data)
-- Applies data quality rules
-- Performs deduplication and cleaning
-- Implements business logic transformations
-- Supports SCD Type 2 and merge operations
-
-#### Gold Layer (Business-Level Aggregations)
-- Creates dimension and fact tables
-- Builds aggregated summaries
-- Supports star schema modeling
-- Enables time-series analysis
-
-## Configuration
-
-### Using YAML Configuration
-
-Create a `config.yaml` file:
-
-```yaml
-bronze:
-  path: /mnt/delta/bronze
-  checkpoint_path: /mnt/delta/bronze/_checkpoints
-
-silver:
-  path: /mnt/delta/silver
-  checkpoint_path: /mnt/delta/silver/_checkpoints
-  partition_columns:
-    - date
-
-gold:
-  path: /mnt/delta/gold
-  checkpoint_path: /mnt/delta/gold/_checkpoints
-
-spark_config:
-  spark.databricks.delta.optimizeWrite.enabled: "true"
-  spark.databricks.delta.autoCompact.enabled: "true"
-```
-
-Load the configuration:
-
-```python
-config = PlatformConfig.from_yaml("config.yaml")
-platform = DeltaPlatform(config)
-```
-
-## Usage Examples
-
-### Data Ingestion
-
-#### JSON Ingestion
-```python
-platform.bronze.ingest_json(
-    source_path="/data/raw/*.json",
-    table_name="events",
-    multiline=True,
-    mode="append"
+# Transform using Strategy pattern
+cleaning_strategy = CleaningStrategy(
+    drop_duplicates=True,
+    drop_null_columns=["user_id", "email"],
+    trim_strings=True
 )
+
+clean_table = (TableBuilder(spark)
+    .name("users_clean")
+    .path("/data/silver/users")
+    .layer(MedallionLayer.SILVER)
+    .build())
+
+users_table.transform(cleaning_strategy, target_table=clean_table)
+
+# Optimize and maintain
+users_table.optimize().vacuum()
 ```
 
-#### XML Ingestion
+## 🏗️ Architecture & Design Patterns
+
+### Builder Pattern (Table Configuration)
+
+The Builder pattern provides a fluent interface for creating complex table configurations:
+
 ```python
-platform.bronze.ingest_xml(
-    source_path="/data/raw/*.xml",
-    table_name="products",
-    row_tag="product",
-    mode="overwrite"
+table = (TableBuilder(spark)
+    .name("orders")
+    .path("/data/bronze/orders")
+    .layer(MedallionLayer.BRONZE)
+    .partition_by(["order_date", "region"])
+    .z_order_by(["customer_id"])
+    .merge_schema(True)
+    .optimize_write(True)
+    .description("Order transactions from payment system")
+    .tag("owner", "data-team")
+    .tag("pii", "false")
+    .build())
+```
+
+### Strategy Pattern (Transformations)
+
+Different transformation strategies can be swapped without changing the table code:
+
+```python
+from delta_platform import (
+    CleaningStrategy,
+    DeduplicationStrategy,
+    FilterStrategy,
+    AggregationStrategy,
+    CustomStrategy
 )
-```
 
-#### Parquet Ingestion
-```python
-platform.bronze.ingest_parquet(
-    source_path="/data/raw/*.parquet",
-    table_name="transactions",
-    partition_by=["year", "month"]
+# Cleaning strategy
+cleaning = CleaningStrategy(
+    drop_duplicates=True,
+    drop_null_columns=["id"],
+    trim_strings=True
 )
-```
 
-#### CSV Ingestion
-```python
-platform.bronze.ingest_csv(
-    source_path="/data/raw/*.csv",
-    table_name="customers",
-    header=True,
-    delimiter=","
+# Deduplication strategy (keep latest)
+dedupe = DeduplicationStrategy(
+    dedupe_columns=["user_id"],
+    order_by="timestamp",
+    keep="last"
 )
-```
 
-### Streaming Ingestion
+# Filter strategy
+filter_active = FilterStrategy("status = 'active'")
 
-```python
-query = platform.bronze.ingest_streaming(
-    source_path="/data/stream",
-    table_name="realtime_events",
-    format="json",
-    trigger_interval="10 seconds"
+# Aggregation strategy
+daily_summary = AggregationStrategy(
+    group_by=["date", "region"],
+    aggregations={"revenue": "sum", "orders": "count"}
 )
+
+# Custom strategy
+def my_transform(df):
+    return df.filter(df.amount > 0).withColumn("category", ...)
+
+custom = CustomStrategy(my_transform)
+
+# Apply any strategy
+table.transform(cleaning, target_table=clean_table)
 ```
 
-### Data Transformation
+### Repository Pattern (Data Sources)
 
-#### Basic Transformation
+Abstract data source access for different formats:
+
 ```python
-def transform(df):
-    from pyspark.sql.functions import trim, upper
-    return df.select(
-        "id",
-        trim(upper("name")).alias("name"),
-        "email"
-    ).dropna()
-
-platform.silver.transform_from_bronze(
-    bronze_table=platform.bronze.table_path("users_raw"),
-    silver_table="users_clean",
-    transformation_func=transform,
-    deduplicate_columns=["id"]
+from delta_platform import (
+    JsonDataSource,
+    XmlDataSource,
+    ParquetDataSource,
+    CsvDataSource
 )
+
+# JSON
+json_source = JsonDataSource(spark, "/data/events/*.json")
+df = json_source.read(multiline=True)
+
+# XML
+xml_source = XmlDataSource(spark, "/data/products.xml")
+df = xml_source.read(row_tag="product")
+
+# Parquet
+parquet_source = ParquetDataSource(spark, "/data/transactions/*.parquet")
+df = parquet_source.read()
+
+# CSV
+csv_source = CsvDataSource(spark, "/data/customers.csv")
+df = csv_source.read(header=True, delimiter=",")
+
+# Streaming
+stream_df = json_source.read_stream()
 ```
 
-#### Merge Updates
-```python
-updates_df = spark.read.parquet("/data/updates")
+## 📊 Table Operations
 
-platform.silver.merge_updates(
+### Append Data
+
+```python
+# Simple append
+table.append(df)
+
+# Append with metadata
+table.append(df, add_metadata=True)
+
+# Append with deduplication
+table.append(df, deduplicate=True, deduplicate_columns=["id"])
+```
+
+### Merge (Upsert)
+
+```python
+# Merge updates
+table.merge(
     source_df=updates_df,
-    target_table="products",
     merge_keys=["product_id"],
     update_columns=["price", "stock"]
 )
-```
 
-#### Slowly Changing Dimension Type 2
-```python
-platform.silver.apply_scd_type2(
-    source_df=customer_updates,
-    target_table="customers_history",
-    natural_keys=["customer_id"],
-    start_date_col="valid_from",
-    end_date_col="valid_to"
+# Insert-only merge
+table.merge(
+    source_df=new_records_df,
+    merge_keys=["id"],
+    insert_only=True
+)
+
+# Merge with delete
+table.merge(
+    source_df=updates_df,
+    merge_keys=["id"],
+    delete_condition="source.is_deleted = true"
 )
 ```
 
-### Gold Layer Analytics
+### Transform Data
 
-#### Create Summary Table
 ```python
-platform.gold.create_summary(
-    source_table=platform.silver.table_path("sales"),
-    summary_table="sales_by_region",
-    group_by=["region", "product_category"],
-    aggregations={
-        "amount": "sum",
-        "quantity": "sum",
-        "order_id": "count"
-    }
-)
-```
+# Using predefined strategies
+table.transform(CleaningStrategy(...), target_table=target)
 
-#### Create Dimension Table
-```python
-platform.gold.create_dimension(
-    source_table=platform.silver.table_path("customers"),
-    dimension_table="dim_customer",
-    dimension_columns=["customer_id", "name", "region"],
-    surrogate_key="customer_key"
-)
-```
+# Using custom transformation
+def enrich_data(df):
+    return df.withColumn("enriched_field", ...)
 
-#### Create Fact Table
-```python
-def join_sources(sources):
-    return sources["orders"] \
-        .join(sources["customers"], "customer_id") \
-        .join(sources["products"], "product_id")
+table.transform(CustomStrategy(enrich_data), target_table=target)
 
-platform.gold.create_fact_table(
-    source_tables={
-        "orders": platform.silver.table_path("orders"),
-        "customers": platform.silver.table_path("customers"),
-        "products": platform.silver.table_path("products")
-    },
-    fact_table="fact_sales",
-    join_func=join_sources,
-    measures=["quantity", "amount"],
-    dimensions=["customer_id", "product_id", "date"]
-)
-```
-
-#### Time-Series Aggregation
-```python
-platform.gold.create_time_series(
-    source_table=platform.silver.table_path("events"),
-    time_series_table="daily_metrics",
-    timestamp_column="event_timestamp",
-    group_by=["region"],
-    metrics={"revenue": "sum", "users": "count"},
-    time_grain="day"
-)
+# Transform without target (just get DataFrame)
+transformed_df = table.transform(strategy)
 ```
 
 ### Table Maintenance
 
-#### Optimize Tables
 ```python
-# Optimize single table
-platform.bronze.optimize_table("users", z_order_by=["user_id"])
+# Optimize with Z-ordering
+table.optimize(z_order_by=["user_id", "date"])
 
-# Optimize all tables
-platform.optimize_all_tables()
+# Vacuum old files
+table.vacuum(retention_hours=168)  # 7 days
+
+# Get statistics
+stats = table.statistics()
+print(stats)
+
+# View history
+history = table.history(limit=10)
+history.show()
+
+# Chain operations
+table.append(df).optimize().vacuum()
 ```
 
-#### Vacuum Tables
-```python
-# Vacuum single table (remove old files)
-platform.silver.vacuum_table("customers", retention_hours=168)
+## 🏅 Medallion Architecture Example
 
-# Vacuum all tables
-platform.vacuum_all_tables(retention_hours=168)
+Complete Bronze → Silver → Gold pipeline:
+
+```python
+from delta_platform import TableBuilder, MedallionLayer, CleaningStrategy, AggregationStrategy
+
+# BRONZE: Ingest raw data
+bronze_table = (TableBuilder(spark)
+    .name("events_raw")
+    .path("/data/bronze/events")
+    .layer(MedallionLayer.BRONZE)
+    .build())
+
+source = JsonDataSource(spark, "/raw/events/*.json")
+bronze_table.append(source.read())
+
+# SILVER: Clean and validate
+silver_table = (TableBuilder(spark)
+    .name("events_clean")
+    .path("/data/silver/events")
+    .layer(MedallionLayer.SILVER)
+    .partition_by(["date"])
+    .build())
+
+cleaning = CleaningStrategy(
+    drop_null_columns=["event_id", "user_id"],
+    trim_strings=True
+)
+
+bronze_table.transform(cleaning, target_table=silver_table)
+
+# GOLD: Aggregate for analytics
+gold_table = (TableBuilder(spark)
+    .name("daily_metrics")
+    .path("/data/gold/daily_metrics")
+    .layer(MedallionLayer.GOLD)
+    .build())
+
+aggregation = AggregationStrategy(
+    group_by=["date", "event_type"],
+    aggregations={"event_id": "count", "revenue": "sum"}
+)
+
+silver_table.transform(aggregation, target_table=gold_table)
 ```
 
-## Advanced Features
+## 🔄 Common Patterns
 
-### Custom Spark Session
+### Incremental Processing
 
 ```python
-from pyspark.sql import SparkSession
+# Read new data
+new_data = source.read()
 
-spark = SparkSession.builder \
-    .appName("CustomApp") \
-    .config("spark.some.config", "value") \
-    .getOrCreate()
+# Merge into existing table
+table.merge(
+    source_df=new_data,
+    merge_keys=["id"],
+    update_columns=["updated_at", "status"]
+)
+```
 
-platform = DeltaPlatform(config, spark=spark)
+### Slowly Changing Dimension (SCD Type 2)
+
+```python
+from pyspark.sql.functions import current_timestamp, lit
+
+def scd_transform(df):
+    return df \
+        .withColumn("effective_start_date", current_timestamp()) \
+        .withColumn("effective_end_date", lit(None).cast("timestamp")) \
+        .withColumn("is_current", lit(True))
+
+# Apply SCD logic
+scd_strategy = CustomStrategy(scd_transform)
+source_table.transform(scd_strategy, target_table=scd_table)
 ```
 
 ### Data Quality Checks
 
 ```python
-# Clean data with built-in utilities
-cleaned_df = platform.silver.clean_data(
-    df,
+# Clean and validate in one pass
+quality_strategy = CleaningStrategy(
     drop_duplicates=True,
-    drop_nulls=["id", "email"],
-    trim_strings=True
+    drop_null_columns=["required_field1", "required_field2"],
+    trim_strings=True,
+    fill_null_values={"optional_field": "default"}
 )
+
+table.transform(quality_strategy, target_table=clean_table)
 ```
 
-### Table Information
+### Deduplication
 
 ```python
-info = platform.get_table_info("silver", "customers")
-print(f"Table version: {info['version']}")
-print(f"Schema: {info['schema']}")
+# Keep latest record per key
+dedupe_strategy = DeduplicationStrategy(
+    dedupe_columns=["customer_id"],
+    order_by="updated_at",
+    keep="last"
+)
+
+table.transform(dedupe_strategy, target_table=dedupe_table)
 ```
 
-## Best Practices
+## 🎓 Best Practices
 
-1. **Use Configuration Files**: Store your platform configuration in YAML for easy environment management
-2. **Partition Strategy**: Partition large tables by date or other high-cardinality columns
-3. **Regular Optimization**: Run `optimize_all_tables()` regularly to maintain query performance
-4. **Vacuum Old Files**: Use `vacuum_all_tables()` to remove old data files and reduce storage costs
-5. **Schema Evolution**: Enable `merge_schema=True` for handling schema changes
-6. **Checkpointing**: Always specify checkpoint paths for streaming workloads
-7. **Deduplication**: Use deduplication in Silver layer to ensure data quality
-8. **Incremental Processing**: Use merge operations for incremental updates
+1. **Use the Builder Pattern** for table configuration - it's more readable and maintainable
+2. **Leverage Strategy Pattern** for transformations - makes your code testable and reusable
+3. **Partition Large Tables** by date or high-cardinality columns
+4. **Enable Z-Ordering** on frequently filtered columns
+5. **Regular Optimization** - run `optimize()` after large writes
+6. **Vacuum Periodically** - clean up old files with `vacuum()`
+7. **Chain Operations** - use method chaining for concise code
+8. **Add Metadata** - always track ingestion timestamps and sources
+9. **Deduplicate at Bronze** - catch duplicates early in the pipeline
+10. **Use Merge for Updates** - more efficient than delete+insert
 
-## Contributing
+## 📚 Examples
 
-Contributions are welcome! Please feel free to submit issues and pull requests.
+The `examples/` directory contains comprehensive examples:
 
-## License
+- `table_management.py` - Single table operations and design patterns
+- `medallion_pipeline.py` - Complete Bronze→Silver→Gold pipeline
+- `basic_usage.py` - Legacy platform-level API (still supported)
+- `advanced_usage.py` - Advanced features and patterns
 
-This project is licensed under the MIT License.
+## 🔧 Configuration
 
-## Support
+### Programmatic Configuration
 
-For questions and support, please open an issue on GitHub.
+```python
+from delta_platform import TableConfig, MedallionLayer
 
-## Examples
+config = TableConfig(
+    name="my_table",
+    path="/data/bronze/my_table",
+    layer=MedallionLayer.BRONZE,
+    partition_columns=["date", "region"],
+    z_order_columns=["user_id"],
+    optimize_write=True,
+    auto_compact=True
+)
 
-See the `examples/` directory for complete working examples:
-- `basic_usage.py`: Basic medallion architecture pipeline
-- `advanced_usage.py`: Advanced features including SCD, streaming, and star schema
-- `config.yaml`: Example configuration file
+table = TableBuilder.from_config(spark, config)
+```
+
+### YAML Configuration
+
+```yaml
+# config.yaml
+tables:
+  users:
+    name: users
+    path: /data/bronze/users
+    layer: bronze
+    partition_columns:
+      - country
+    z_order_columns:
+      - user_id
+```
+
+## 🆚 Design Pattern Benefits
+
+### Before (Procedural)
+```python
+df = spark.read.json("/data/raw/*.json")
+df = df.dropDuplicates()
+df = df.dropna(subset=["id"])
+df.write.format("delta").mode("append").save("/data/bronze/table")
+```
+
+### After (Design Patterns)
+```python
+table = TableBuilder(spark).name("table").path("/data/bronze/table").layer(BRONZE).build()
+source = JsonDataSource(spark, "/data/raw/*.json")
+strategy = CleaningStrategy(drop_duplicates=True, drop_null_columns=["id"])
+table.append(source.read()).transform(strategy).optimize()
+```
+
+**Benefits:**
+- ✅ More readable and maintainable
+- ✅ Reusable strategies
+- ✅ Testable components
+- ✅ Extensible architecture
+- ✅ Method chaining
+- ✅ Type safety
+
+## 📖 API Reference
+
+### Core Classes
+
+- `DeltaTable` - Manages a single Delta table with all operations
+- `TableBuilder` - Builder pattern for table configuration
+- `TableConfig` - Table configuration dataclass
+- `MedallionLayer` - Enum for Bronze/Silver/Gold layers
+
+### Strategies
+
+- `CleaningStrategy` - Data cleaning operations
+- `DeduplicationStrategy` - Remove duplicates
+- `FilterStrategy` - Filter data by condition
+- `AggregationStrategy` - Group and aggregate
+- `CustomStrategy` - User-defined transformations
+
+### Repositories
+
+- `JsonDataSource` - Read JSON data
+- `XmlDataSource` - Read XML data
+- `ParquetDataSource` - Read Parquet data
+- `CsvDataSource` - Read CSV data
+- `DeltaDataSource` - Read Delta Lake data
+
+## 🔄 Migration from v0.1
+
+The library maintains backward compatibility with the v0.1 platform-level API:
+
+```python
+# v0.1 (still works)
+from delta_platform import DeltaPlatform, PlatformConfig
+platform = DeltaPlatform(config)
+platform.bronze.ingest_json(...)
+
+# v0.2 (recommended)
+from delta_platform import TableBuilder, JsonDataSource
+table = TableBuilder(spark).name(...).build()
+source = JsonDataSource(spark, path)
+table.append(source.read())
+```
+
+## 🤝 Contributing
+
+Contributions are welcome! The library follows SOLID principles and design patterns.
+
+## 📄 License
+
+MIT License - see LICENSE file for details.
+
+## 📞 Support
+
+- GitHub Issues: Report bugs and request features
+- Documentation: See `examples/` for working code
+- Design Patterns: Builder, Strategy, Repository patterns used throughout
+
+## 🎯 Roadmap
+
+- [ ] Factory pattern for table creation from metadata
+- [ ] Observer pattern for data quality monitoring
+- [ ] Command pattern for complex pipelines
+- [ ] Additional transformation strategies
+- [ ] Unity Catalog integration
+- [ ] Delta Sharing support
