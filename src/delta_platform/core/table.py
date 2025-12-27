@@ -334,6 +334,201 @@ class DeltaTable:
             "partition_columns": self.config.partition_columns,
         }
 
+    def time_travel(
+        self,
+        version: Optional[int] = None,
+        timestamp: Optional[str] = None
+    ) -> DataFrame:
+        """Read table at a specific version or timestamp (time travel).
+
+        Args:
+            version: Table version number to read
+            timestamp: Timestamp string to read (format: 'YYYY-MM-DD HH:MM:SS')
+
+        Returns:
+            DataFrame at the specified version or timestamp
+
+        Raises:
+            ValueError: If neither or both version and timestamp are provided
+            TableNotFoundError: If table doesn't exist
+
+        Example:
+            >>> # Read table at version 5
+            >>> df_v5 = table.time_travel(version=5)
+            >>>
+            >>> # Read table at specific timestamp
+            >>> df_yesterday = table.time_travel(timestamp="2024-01-15 10:00:00")
+        """
+        from delta_platform.exceptions import TableNotFoundError
+
+        if not self.exists:
+            raise TableNotFoundError(self.config.name, self.config.path)
+
+        if version is None and timestamp is None:
+            raise ValueError("Must provide either version or timestamp")
+
+        if version is not None and timestamp is not None:
+            raise ValueError("Cannot provide both version and timestamp")
+
+        reader = self.spark.read.format("delta")
+
+        if version is not None:
+            reader = reader.option("versionAsOf", version)
+        else:
+            reader = reader.option("timestampAsOf", timestamp)
+
+        return reader.load(self.config.path)
+
+    def clone(
+        self,
+        target_path: str,
+        shallow: bool = False,
+        replace: bool = False
+    ) -> "DeltaTable":
+        """Clone this table to a new location.
+
+        Args:
+            target_path: Path for the cloned table
+            shallow: If True, create shallow clone (metadata only)
+                    If False, create deep clone (full copy)
+            replace: If True, replace existing table at target
+
+        Returns:
+            New DeltaTable instance for the cloned table
+
+        Example:
+            >>> # Deep clone (full copy)
+            >>> cloned = table.clone("/data/backup/users")
+            >>>
+            >>> # Shallow clone (metadata only, faster)
+            >>> snapshot = table.clone("/data/snapshots/users", shallow=True)
+        """
+        from delta_platform.core.table_builder import TableBuilder
+
+        clone_type = "SHALLOW" if shallow else "DEEP"
+        replace_clause = "OR REPLACE" if replace else ""
+
+        # Execute clone operation
+        clone_sql = f"CREATE {replace_clause} TABLE delta.`{target_path}` {clone_type} CLONE delta.`{self.config.path}`"
+        self.spark.sql(clone_sql)
+
+        # Return new table instance
+        return (TableBuilder(self.spark)
+                .name(f"{self.config.name}_clone")
+                .path(target_path)
+                .layer(self.config.layer)
+                .build())
+
+    def restore(self, version: Optional[int] = None, timestamp: Optional[str] = None) -> "DeltaTable":
+        """Restore table to a previous version.
+
+        Args:
+            version: Version number to restore to
+            timestamp: Timestamp to restore to
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            ValueError: If neither or both version and timestamp are provided
+
+        Example:
+            >>> # Restore to version 10
+            >>> table.restore(version=10)
+            >>>
+            >>> # Restore to yesterday
+            >>> table.restore(timestamp="2024-01-15 10:00:00")
+        """
+        if version is None and timestamp is None:
+            raise ValueError("Must provide either version or timestamp")
+
+        if version is not None and timestamp is not None:
+            raise ValueError("Cannot provide both version and timestamp")
+
+        if version is not None:
+            restore_sql = f"RESTORE TABLE delta.`{self.config.path}` TO VERSION AS OF {version}"
+        else:
+            restore_sql = f"RESTORE TABLE delta.`{self.config.path}` TO TIMESTAMP AS OF '{timestamp}'"
+
+        self.spark.sql(restore_sql)
+
+        # Clear cached delta table to force reload
+        self._delta_table = None
+
+        return self
+
+    def generate_manifest(self, mode: str = "symlink_format_manifest") -> "DeltaTable":
+        """Generate manifest files for Presto/Athena compatibility.
+
+        Args:
+            mode: Manifest mode (default: "symlink_format_manifest")
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            >>> # Generate manifest for Athena/Presto
+            >>> table.generate_manifest()
+        """
+        self.delta_table.generate(mode)
+        return self
+
+    def convert_to_delta(
+        self,
+        partition_schema: Optional[str] = None
+    ) -> "DeltaTable":
+        """Convert a Parquet table to Delta format.
+
+        Args:
+            partition_schema: Partition schema in Hive format (e.g., "date DATE, region STRING")
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            >>> # Convert Parquet to Delta
+            >>> table.convert_to_delta(partition_schema="year INT, month INT")
+        """
+        if partition_schema:
+            convert_sql = f"CONVERT TO DELTA parquet.`{self.config.path}` PARTITIONED BY ({partition_schema})"
+        else:
+            convert_sql = f"CONVERT TO DELTA parquet.`{self.config.path}`"
+
+        self.spark.sql(convert_sql)
+        return self
+
+    def get_details(self) -> Dict[str, Any]:
+        """Get detailed table information.
+
+        Returns:
+            Dictionary with detailed table information including:
+            - Format
+            - Partition columns
+            - Table properties
+            - Statistics
+
+        Example:
+            >>> details = table.get_details()
+            >>> print(details['numFiles'])
+        """
+        describe_df = self.spark.sql(f"DESCRIBE DETAIL delta.`{self.config.path}`")
+        row = describe_df.collect()[0]
+
+        return {
+            "format": row.format,
+            "id": row.id,
+            "name": row.name,
+            "location": row.location,
+            "created_at": row.createdAt,
+            "last_modified": row.lastModified,
+            "partition_columns": row.partitionColumns,
+            "num_files": row.numFiles,
+            "size_bytes": row.sizeInBytes,
+            "properties": row.properties,
+            "min_reader_version": row.minReaderVersion,
+            "min_writer_version": row.minWriterVersion
+        }
+
     def _write(self, df: DataFrame, mode: str = "append") -> None:
         """Internal method to write DataFrame to table.
 

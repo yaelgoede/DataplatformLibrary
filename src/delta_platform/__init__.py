@@ -7,6 +7,8 @@ This library follows design patterns for maintainable and extensible code:
 - Builder Pattern: For configuring tables
 - Strategy Pattern: For pluggable transformations
 - Repository Pattern: For data source abstraction
+- Factory Pattern: For creating tables from various sources
+- Observer Pattern: For monitoring table operations
 """
 
 # Core components (recommended for new code)
@@ -34,6 +36,40 @@ from delta_platform.repositories.data_source import (
     DeltaDataSource
 )
 
+# Validation framework
+from delta_platform.validation import (
+    ValidationRule,
+    ValidationResult,
+    DataValidator,
+    SchemaValidation,
+    UniquenessValidation,
+    RangeValidation,
+    NullCheckValidation,
+    RegexValidation,
+    CustomValidation
+)
+
+# CDC support
+from delta_platform.cdc import (
+    CDCStrategy,
+    CDCOperation,
+    CDCProcessor
+)
+
+# Factory pattern
+from delta_platform.factories import TableFactory
+
+# Observer pattern
+from delta_platform.observers import (
+    TableObserver,
+    MetricsObserver,
+    DataQualityObserver,
+    LoggingObserver
+)
+
+# Exceptions
+from delta_platform import exceptions
+
 # Legacy platform-level classes (maintained for backward compatibility)
 from delta_platform.platform import DeltaPlatform
 from delta_platform.config import PlatformConfig
@@ -41,7 +77,7 @@ from delta_platform.layers.bronze import BronzeLayer
 from delta_platform.layers.silver import SilverLayer
 from delta_platform.layers.gold import GoldLayer
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     # Core (recommended)
@@ -63,6 +99,29 @@ __all__ = [
     "ParquetDataSource",
     "CsvDataSource",
     "DeltaDataSource",
+    # Validation
+    "ValidationRule",
+    "ValidationResult",
+    "DataValidator",
+    "SchemaValidation",
+    "UniquenessValidation",
+    "RangeValidation",
+    "NullCheckValidation",
+    "RegexValidation",
+    "CustomValidation",
+    # CDC
+    "CDCStrategy",
+    "CDCOperation",
+    "CDCProcessor",
+    # Factory
+    "TableFactory",
+    # Observers
+    "TableObserver",
+    "MetricsObserver",
+    "DataQualityObserver",
+    "LoggingObserver",
+    # Exceptions
+    "exceptions",
     # Legacy
     "DeltaPlatform",
     "PlatformConfig",
