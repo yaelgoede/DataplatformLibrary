@@ -77,6 +77,27 @@ from delta_platform.layers.bronze import BronzeLayer
 from delta_platform.layers.silver import SilverLayer
 from delta_platform.layers.gold import GoldLayer
 
+# Streaming
+from delta_platform.streaming import StreamingTable, TriggerConfig, TriggerType
+
+# Profiling
+from delta_platform.profiling import DataProfiler, ProfileReport
+
+# Optimization
+from delta_platform.optimization import OptimizationAdvisor, Recommendation, RecommendationType
+
+# Testing
+from delta_platform.testing import MockDataSource, MockTable, TableTestCase, create_test_spark
+
+# Unity Catalog
+from delta_platform.unity_catalog import UnityCatalogTable
+
+# Benchmarking
+from delta_platform.benchmarking import PerformanceBenchmark, BenchmarkResult
+
+# Plugins
+from delta_platform.plugins import Plugin, PluginManager
+
 __version__ = "0.3.0"
 
 __all__ = [
@@ -120,6 +141,30 @@ __all__ = [
     "MetricsObserver",
     "DataQualityObserver",
     "LoggingObserver",
+    # Streaming
+    "StreamingTable",
+    "TriggerConfig",
+    "TriggerType",
+    # Profiling
+    "DataProfiler",
+    "ProfileReport",
+    # Optimization
+    "OptimizationAdvisor",
+    "Recommendation",
+    "RecommendationType",
+    # Testing
+    "MockDataSource",
+    "MockTable",
+    "TableTestCase",
+    "create_test_spark",
+    # Unity Catalog
+    "UnityCatalogTable",
+    # Benchmarking
+    "PerformanceBenchmark",
+    "BenchmarkResult",
+    # Plugins
+    "Plugin",
+    "PluginManager",
     # Exceptions
     "exceptions",
     # Legacy
